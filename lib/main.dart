@@ -314,6 +314,12 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 final amount = double.tryParse(amountController.text);
                 final title = titleController.text.trim();
 
+                if (!isExpense && _currentBalance == 0) {
+                  setDialogState(() {
+                    errorText = 'Please add sufficient balance amount.';
+                  });
+                  return;
+                }
                 if (amount == null || amount <= 0) {
                   setDialogState(() {
                     errorText = 'Enter a valid amount';
