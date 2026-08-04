@@ -1,6 +1,6 @@
 {
-    "name": "balance_enquiry_app",
-    "short_name": "balance_enquiry_app",
+    "name": "MonoBal",
+    "short_name": "MonoBal",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#ffffff",
