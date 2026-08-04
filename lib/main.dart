@@ -45,7 +45,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Monthly Balance Tracker',
+      title: 'MonoBal',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.teal,
@@ -395,6 +395,10 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Image.asset('assets/icon/icon.png'),
+        ),
         title: Text(_monthLabel()),
         centerTitle: true,
         actions: [
