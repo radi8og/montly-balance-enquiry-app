@@ -1,4 +1,4 @@
-# Monthly Balance Tracker
+# MonoBal - The Monthly Balance Tracker 
 
 A simple Flutter app to track your bank balance and spending for the **current month only**. Set a starting balance, log income and expenses, and watch your balance update in real time.
 
