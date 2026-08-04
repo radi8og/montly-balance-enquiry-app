@@ -2,7 +2,7 @@
 
 A simple Flutter app to track your bank balance and spending for the **current month only**. Set a starting balance, log income and expenses, and watch your balance update in real time.
 
-Built for a college hackathon project (with an eye toward Smart India Hackathon scalability).
+Built it for myself and people like me!
 
 ---
 
