@@ -314,12 +314,6 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 final amount = double.tryParse(amountController.text);
                 final title = titleController.text.trim();
 
-                if (!_startingBalanceSet) {
-                  setDialogState(() {
-                    errorText = 'Please add your starting balance first';
-                  });
-                  return;
-                }
                 if (amount == null || amount <= 0) {
                   setDialogState(() {
                     errorText = 'Enter a valid amount';
