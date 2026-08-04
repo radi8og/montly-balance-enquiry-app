@@ -205,48 +205,64 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     final controller = TextEditingController(
       text: _startingBalanceSet ? _startingBalance.toStringAsFixed(2) : '',
     );
+    String? errorText;
+ 
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (context) => AlertDialog(
-        title: Text(
-          _startingBalanceSet ? 'Reset Starting Balance' : 'Set Starting Balance',
-        ),
-        content: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            prefixText: '₹ ',
-            hintText: 'Enter your current balance',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(
+            _startingBalanceSet ? 'Reset Starting Balance' : 'Set Starting Balance',
           ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel'),
+          content: TextField(
+            controller: controller,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              prefixText: '₹ ',
+              hintText: 'Enter your current balance',
+              errorText: errorText,
+            ),
+            autofocus: true,
           ),
-          TextButton(
-            onPressed: () {
-              final value = double.tryParse(controller.text);
-              if (value != null) {
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final value = double.tryParse(controller.text);
+                if (value == null) {
+                  setDialogState(() {
+                    errorText = 'Enter a valid amount';
+                  });
+                  return;
+                }
+                if (value < 0) {
+                  setDialogState(() {
+                    errorText = 'Balance cannot be negative';
+                  });
+                  return;
+                }
                 setState(() {
                   _startingBalance = value;
                   _startingBalanceSet = true;
                 });
                 _saveStartingBalance();
                 Navigator.pop(context);
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
       ),
     );
   }
-
+ 
   void _confirmResetBalance() {
     showDialog(
       context: context,
