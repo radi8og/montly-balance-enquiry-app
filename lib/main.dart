@@ -206,14 +206,15 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
       text: _startingBalanceSet ? _startingBalance.toStringAsFixed(2) : '',
     );
     String? errorText;
- 
+    final isResetting = _startingBalanceSet;
+
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text(
-            _startingBalanceSet ? 'Reset Starting Balance' : 'Set Starting Balance',
+            isResetting ? 'Reset Starting Balance' : 'Set Starting Balance',
           ),
           content: TextField(
             controller: controller,
@@ -249,10 +250,16 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                   return;
                 }
                 setState(() {
+                  if (isResetting) {
+                    _transactions.removeWhere((t) =>
+                        t.date.year == _currentMonth.year &&
+                        t.date.month == _currentMonth.month);
+                  }
                   _startingBalance = value;
                   _startingBalanceSet = true;
                 });
                 _saveStartingBalance();
+                _saveTransactions();
                 Navigator.pop(context);
               },
               child: const Text('Save'),
@@ -269,9 +276,9 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
       builder: (context) => AlertDialog(
         title: const Text('Reset Starting Balance?'),
         content: const Text(
-          'This lets you correct your starting balance for this month. '
-          'Your existing transactions will stay untouched, and the balance '
-          'will recalculate from the new starting value.',
+          'This lets you set a new starting balance for this month. '
+          'All transactions logged so far this month will be cleared, '
+          'and the balance will start fresh from the new value.',
         ),
         actions: [
           TextButton(
