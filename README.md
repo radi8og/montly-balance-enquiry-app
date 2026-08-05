@@ -93,7 +93,6 @@ Four issues fixed in this release:
 
 - Data is stored **locally per device only** — there's no shared backend, so transactions don't sync across devices or between users.
 - Only the current month is viewable; past months' data is retained in storage but not yet browsable in the UI.
-- No authentication or multi-user support — relevant if this evolves into a shared/family expense tracker for SIH.
 
 ---
 
