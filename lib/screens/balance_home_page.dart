@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
-import '../../models/transaction.dart';
-import '../../services/storage_service.dart';
-import '../../theme/app_colors.dart';
+import '../models/transaction.dart';
+import '../services/storage_service.dart';
+import '../theme/app_colors.dart';
+
+/// Which subset of this month's transactions to show.
+enum TransactionFilter { all, income, expense }
+
+/// Currency symbols the user can choose from in the App Bar.
+const List<String> kCurrencyOptions = ['₹', '\$', '€', '£'];
 
 class BalanceHomePage extends StatefulWidget {
   final bool isDarkMode;
@@ -25,10 +31,19 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   bool _isLoading = true;
   final List<Transaction> _transactions = [];
 
+  String _currencySymbol = '₹';
+
+  String _searchQuery = '';
+  TransactionFilter _filter = TransactionFilter.all;
+
   final DateTime _currentMonth = DateTime.now();
 
   String get _currentMonthKey =>
       '${_currentMonth.year}-${_currentMonth.month}';
+
+  // ---------------------------------------------------------------------
+  // Lifecycle / loading
+  // ---------------------------------------------------------------------
 
   @override
   void initState() {
@@ -40,6 +55,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     final savedBalance = await _storage.getStartingBalance();
     final savedMonthKey = await _storage.getBalanceMonthKey();
     final savedTransactions = await _storage.getTransactions();
+    final savedCurrency = await _storage.getCurrencySymbol();
 
     _transactions.addAll(savedTransactions);
 
@@ -49,6 +65,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
 
     setState(() {
       _isLoading = false;
+      _currencySymbol = savedCurrency;
       if (validForThisMonth) {
         _startingBalance = savedBalance;
         _startingBalanceSet = true;
@@ -61,6 +78,19 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
       _promptStartingBalance();
     }
   }
+
+  Future<void> _changeCurrency(String symbol) async {
+    setState(() {
+      _currencySymbol = symbol;
+    });
+    await _storage.setCurrencySymbol(symbol);
+  }
+
+  String _money(double amount) => '$_currencySymbol${amount.toStringAsFixed(2)}';
+
+  // ---------------------------------------------------------------------
+  // Derived data
+  // ---------------------------------------------------------------------
 
   double get _monthTotal {
     double total = 0;
@@ -85,6 +115,24 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     return list;
   }
 
+  /// Month transactions after applying the search query and filter chip.
+  List<Transaction> get _visibleTransactions {
+    return _monthTransactions.where((t) {
+      final matchesQuery =
+          _searchQuery.isEmpty ||
+          t.title.toLowerCase().contains(_searchQuery.toLowerCase());
+
+      final isExpense = t.amount < 0;
+      final matchesFilter = switch (_filter) {
+        TransactionFilter.all => true,
+        TransactionFilter.income => !isExpense,
+        TransactionFilter.expense => isExpense,
+      };
+
+      return matchesQuery && matchesFilter;
+    }).toList();
+  }
+
   String _monthLabel() {
     const months = [
       'January', 'February', 'March', 'April', 'May', 'June',
@@ -92,6 +140,10 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     ];
     return '${months[_currentMonth.month - 1]} ${_currentMonth.year}';
   }
+
+  // ---------------------------------------------------------------------
+  // Starting balance dialog
+  // ---------------------------------------------------------------------
 
   void _promptStartingBalance() {
     final controller = TextEditingController(
@@ -113,7 +165,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
             keyboardType:
                 const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
-              prefixText: '₹ ',
+              prefixText: '$_currencySymbol ',
               hintText: 'Enter your current balance',
               errorText: errorText,
             ),
@@ -121,9 +173,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
+              onPressed: () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
             TextButton(
@@ -189,6 +239,10 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     );
   }
 
+  // ---------------------------------------------------------------------
+  // Add transaction
+  // ---------------------------------------------------------------------
+
   void _addTransaction({required bool isExpense}) {
     final titleController = TextEditingController();
     final amountController = TextEditingController();
@@ -213,7 +267,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                     const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Amount',
-                  prefixText: '₹ ',
+                  prefixText: '$_currencySymbol ',
                   errorText: errorText,
                 ),
               ),
@@ -250,7 +304,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 if (isExpense && amount > _currentBalance) {
                   setDialogState(() {
                     errorText =
-                        'Insufficient balance (₹${_currentBalance.toStringAsFixed(2)} available)';
+                        'Insufficient balance (${_money(_currentBalance)} available)';
                   });
                   return;
                 }
@@ -276,6 +330,105 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     );
   }
 
+  // ---------------------------------------------------------------------
+  // Edit transaction  (v1.9)
+  // ---------------------------------------------------------------------
+
+  void _editTransaction(Transaction original) {
+    final isExpense = original.amount < 0;
+    final titleController = TextEditingController(text: original.title);
+    final amountController = TextEditingController(
+      text: original.amount.abs().toStringAsFixed(2),
+    );
+    String? errorText;
+
+    // Balance as if this transaction didn't exist yet — lets the user
+    // re-save the same or a smaller amount without being falsely blocked
+    // by its own previous contribution to the balance.
+    final balanceExcludingThis = _currentBalance - original.amount;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(isExpense ? 'Edit Expense' : 'Edit Income'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleController,
+                decoration: const InputDecoration(labelText: 'Title'),
+                autofocus: true,
+              ),
+              TextField(
+                controller: amountController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: 'Amount',
+                  prefixText: '$_currencySymbol ',
+                  errorText: errorText,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final amount = double.tryParse(amountController.text);
+                final title = titleController.text.trim();
+
+                if (amount == null || amount <= 0) {
+                  setDialogState(() {
+                    errorText = 'Enter a valid amount';
+                  });
+                  return;
+                }
+                if (title.isEmpty) {
+                  setDialogState(() {
+                    errorText = null;
+                  });
+                  return;
+                }
+                if (isExpense && amount > balanceExcludingThis) {
+                  setDialogState(() {
+                    errorText =
+                        'Insufficient balance (${_money(balanceExcludingThis)} available)';
+                  });
+                  return;
+                }
+
+                setState(() {
+                  final index =
+                      _transactions.indexWhere((tx) => tx.id == original.id);
+                  if (index != -1) {
+                    _transactions[index] = Transaction(
+                      id: original.id,
+                      title: title,
+                      amount: isExpense ? -amount : amount,
+                      date: original.date, // keep the original entry date
+                    );
+                  }
+                });
+                await _storage.saveTransactions(_transactions);
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Delete transaction
+  // ---------------------------------------------------------------------
+
   void _deleteTransaction(Transaction t) async {
     setState(() {
       _transactions.removeWhere((tx) => tx.id == t.id);
@@ -288,8 +441,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Transaction'),
-        content: Text(
-            'Remove "${t.title}" (₹${t.amount.abs().toStringAsFixed(2)})?'),
+        content: Text('Remove "${t.title}" (${_money(t.amount.abs())})?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -307,6 +459,10 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     );
   }
 
+  // ---------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -316,8 +472,32 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
           child: Image.asset('assets/icon/icon.png'),
         ),
         title: Text(_monthLabel()),
-        centerTitle: true,
+        centerTitle: false,
         actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Change currency',
+            initialValue: _currencySymbol,
+            onSelected: _changeCurrency,
+            itemBuilder: (context) => kCurrencyOptions
+                .map((symbol) => PopupMenuItem<String>(
+                      value: symbol,
+                      child: Text(symbol),
+                    ))
+                .toList(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                widthFactor: 1,
+                child: Text(
+                  _currencySymbol,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ),
           IconButton(
             icon: Icon(
               widget.isDarkMode ? Icons.light_mode : Icons.dark_mode,
@@ -350,7 +530,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '₹${_currentBalance.toStringAsFixed(2)}',
+                        _money(_currentBalance),
                         style: const TextStyle(
                           fontSize: 36,
                           fontWeight: FontWeight.bold,
@@ -358,7 +538,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'This month: ${_monthTotal >= 0 ? '+' : ''}₹${_monthTotal.toStringAsFixed(2)}',
+                        'This month: ${_monthTotal >= 0 ? '+' : ''}${_money(_monthTotal)}',
                         style: TextStyle(
                           fontSize: 14,
                           color: _monthTotal >= 0
@@ -369,19 +549,68 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                     ],
                   ),
                 ),
+
+                // ---- Search + filter bar (v1.9) ----
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: TextField(
+                    onChanged: (value) => setState(() => _searchQuery = value),
+                    decoration: InputDecoration(
+                      hintText: 'Search transactions',
+                      prefixIcon: const Icon(Icons.search),
+                      isDense: true,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ChoiceChip(
+                          label: const Text('All'),
+                          selected: _filter == TransactionFilter.all,
+                          onSelected: (_) =>
+                              setState(() => _filter = TransactionFilter.all),
+                        ),
+                        const SizedBox(width: 8),
+                        ChoiceChip(
+                          label: const Text('Income'),
+                          selected: _filter == TransactionFilter.income,
+                          onSelected: (_) => setState(
+                              () => _filter = TransactionFilter.income),
+                        ),
+                        const SizedBox(width: 8),
+                        ChoiceChip(
+                          label: const Text('Expenses'),
+                          selected: _filter == TransactionFilter.expense,
+                          onSelected: (_) => setState(
+                              () => _filter = TransactionFilter.expense),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
                 Expanded(
-                  child: _monthTransactions.isEmpty
-                      ? const Center(
+                  child: _visibleTransactions.isEmpty
+                      ? Center(
                           child: Text(
-                            'No transactions yet this month.\nAdd income or an expense below.',
+                            _monthTransactions.isEmpty
+                                ? 'No transactions yet this month.\nAdd income or an expense below.'
+                                : 'No transactions match your search.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey),
+                            style: const TextStyle(color: Colors.grey),
                           ),
                         )
                       : ListView.builder(
-                          itemCount: _monthTransactions.length,
+                          itemCount: _visibleTransactions.length,
                           itemBuilder: (context, index) {
-                            final t = _monthTransactions[index];
+                            final t = _visibleTransactions[index];
                             final isExpense = t.amount < 0;
                             return Dismissible(
                               key: ValueKey(t.id),
@@ -399,6 +628,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                                 return false; // dialog handles removal
                               },
                               child: ListTile(
+                                onTap: () => _editTransaction(t),
                                 leading: Icon(
                                   isExpense
                                       ? Icons.arrow_downward
@@ -415,7 +645,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
-                                      '${isExpense ? '-' : '+'}₹${t.amount.abs().toStringAsFixed(2)}',
+                                      '${isExpense ? '-' : '+'}${_money(t.amount.abs())}',
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         color: isExpense

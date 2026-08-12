@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../models/transaction.dart';
+import '../models/transaction.dart';
 
 /// Central place for every piece of data the app persists locally via
 /// SharedPreferences: the starting balance (and which month it applies to),
@@ -13,6 +13,7 @@ class StorageService {
   static const _kBalanceMonthKey = 'balance_month';
   static const _kTransactionsKey = 'transactions';
   static const _kDarkModeKey = 'dark_mode';
+  static const _kCurrencySymbolKey = 'currency_symbol';
 
   // ---- Starting balance ----
 
@@ -60,5 +61,17 @@ class StorageService {
   Future<void> setDarkMode(bool isDark) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kDarkModeKey, isDark);
+  }
+
+  // ---- Currency preference ----
+
+  Future<String> getCurrencySymbol() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kCurrencySymbolKey) ?? '₹';
+  }
+
+  Future<void> setCurrencySymbol(String symbol) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kCurrencySymbolKey, symbol);
   }
 }
