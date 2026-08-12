@@ -83,13 +83,16 @@ Four issues fixed in this release:
 - Preference is persisted via `shared_preferences` (`dark_mode` key) and restored on app launch.
 - Both themes share the same teal color scheme; only brightness changes, keeping income/expense color coding readable in both modes.
 
+### v1.8 — Reset balance now clears the month's transactions
+- **Issue:** Resetting the starting balance mid-month left old transactions in place, causing the balance to no longer match the intended fresh start.
+- **Fix:** Resetting the starting balance now clears all transactions logged for the current month before applying the new value. First-time balance setup is unaffected, since there are no transactions to clear at that point. The reset confirmation dialog's wording was updated to reflect this.
+
 ---
 
 ## Known Limitations / Future Scope
 
 - Data is stored **locally per device only** — there's no shared backend, so transactions don't sync across devices or between users.
 - Only the current month is viewable; past months' data is retained in storage but not yet browsable in the UI.
-- No authentication or multi-user support — relevant if this evolves into a shared/family expense tracker for SIH.
 
 ---
 
