@@ -33,6 +33,12 @@ class StorageService {
     await prefs.setString(_kBalanceMonthKey, monthKey);
   }
 
+  Future<void> clearStartingBalance() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kStartingBalanceKey);
+    await prefs.remove(_kBalanceMonthKey);
+  }
+
   // ---- Transactions ----
 
   Future<List<Transaction>> getTransactions() async {

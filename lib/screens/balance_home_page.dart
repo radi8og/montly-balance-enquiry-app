@@ -79,11 +79,49 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     }
   }
 
-  Future<void> _changeCurrency(String symbol) async {
+  Future<void> _applyCurrencyChange(String symbol) async {
     setState(() {
       _currencySymbol = symbol;
+      _transactions.removeWhere((t) =>
+          t.date.year == _currentMonth.year &&
+          t.date.month == _currentMonth.month);
+      _startingBalanceSet = false;
+      _startingBalance = 0.0;
     });
     await _storage.setCurrencySymbol(symbol);
+    await _storage.saveTransactions(_transactions);
+    await _storage.clearStartingBalance();
+    _promptStartingBalance();
+  }
+
+  void _confirmCurrencyChange(String symbol) {
+    if (symbol == _currencySymbol) return; // no actual change
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Change Currency?'),
+        content: Text(
+          'Switching to $symbol will clear this month\'s starting balance '
+          'and all logged transactions, since amounts recorded in the old '
+          'currency can\'t be converted automatically. You\'ll be asked to '
+          'set a new starting balance in $symbol.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _applyCurrencyChange(symbol);
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _money(double amount) => '$_currencySymbol${amount.toStringAsFixed(2)}';
@@ -477,7 +515,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
           PopupMenuButton<String>(
             tooltip: 'Change currency',
             initialValue: _currencySymbol,
-            onSelected: _changeCurrency,
+            onSelected: _confirmCurrencyChange,
             itemBuilder: (context) => kCurrencyOptions
                 .map((symbol) => PopupMenuItem<String>(
                       value: symbol,
