@@ -10,10 +10,13 @@ Built it for myself and people like me!
 
 - **Monthly balance tracking** — balance is calculated as `starting balance + this month's transactions`, scoped to the current calendar month.
 - **Add Income / Expense** — two floating action buttons open a simple dialog to log a transaction with a title and amount.
+- **Edit transactions** — tap any transaction to update its title or amount, with the same overspending validation applied as new entries.
+- **Search & filter** — a search bar filters transactions by title in real time, alongside `All` / `Income` / `Expenses` filter chips.
 - **Delete transactions** — swipe left on any transaction or tap the trash icon, with a confirmation prompt before removal.
 - **Local persistence** — starting balance and transaction history are saved on-device using `shared_preferences`, so data survives app restarts.
 - **Dark mode** — toggle between light and dark themes via the app bar icon; preference is remembered across sessions.
-- **Reset starting balance** — a confirmation-gated option to correct the starting balance mid-month without touching existing transaction history.
+- **Currency selection** — choose between ₹, $, €, and £ from the app bar; the choice persists across sessions and updates every balance/amount display and validation message throughout the app.
+- **Reset starting balance** — a confirmation-gated option to correct the starting balance mid-month, which also clears that month's logged transactions for a clean restart.
 
 ---
 
@@ -27,6 +30,29 @@ dependencies:
 ```
 
 No other third-party packages are required — everything else uses Flutter's built-in widgets and APIs.
+
+---
+
+## Project Structure
+
+The app is organized into focused files rather than one large `main.dart`:
+
+```
+lib/
+├── main.dart                     — entry point only, calls runApp(MyApp())
+├── app.dart                      — MyApp widget: MaterialApp setup, theme mode state
+├── models/
+│   └── transaction.dart          — Transaction data class (toJson/fromJson)
+├── services/
+│   └── storage_service.dart      — all SharedPreferences reads/writes (balance, transactions, theme, currency)
+└── theme/
+│   ├── app_colors.dart           — color constants
+│   └── app_theme.dart            — light/dark ThemeData
+└── screens/
+    └── balance_home_page.dart    — main UI: balance card, search/filter, transaction list, dialogs
+```
+
+`storage_service.dart` is the only file that talks to `shared_preferences` directly — every other file goes through it.
 
 ---
 
@@ -87,12 +113,38 @@ Four issues fixed in this release:
 - **Issue:** Resetting the starting balance mid-month left old transactions in place, causing the balance to no longer match the intended fresh start.
 - **Fix:** Resetting the starting balance now clears all transactions logged for the current month before applying the new value. First-time balance setup is unaffected, since there are no transactions to clear at that point. The reset confirmation dialog's wording was updated to reflect this.
 
+### v1.9 — Edit transactions, search & filter, currency support
+Three features added in this release:
+
+1. **Edit existing transactions**
+   - Tapping any transaction in the list opens an Edit dialog pre-filled with its title and amount.
+   - The transaction's type (income/expense) stays fixed; only title and amount are editable.
+   - Editing an expense re-validates it against the current balance — with the transaction's own prior amount excluded from that check first, so re-saving the same value never falsely triggers an "insufficient balance" error.
+   - Cancel discards changes; Save updates the entry in place and persists it.
+
+2. **Search & filter bar**
+   - A search field above the list filters transactions by title in real time.
+   - `All` / `Income` / `Expenses` filter chips narrow the list further, combining with the search query.
+   - Chips scroll horizontally to avoid overflow on narrow screens.
+
+3. **Currency symbol support**
+   - A currency picker in the app bar offers ₹, $, €, and £.
+   - The selection is saved via `shared_preferences` and restored on launch.
+   - Every balance display, transaction amount, and validation message updates to the chosen symbol.
+
+- **Refactor:** the app was also restructured from a single `main.dart` into the modular `lib/` folder layout described above (models, services, theme, screens), with no functional changes.
+
+### v1.9.1 — Currency change resets balance and transactions
+- **Issue:** Changing the currency symbol left the existing starting balance and transactions in place, even though their amounts were recorded in a different currency and can't be auto-converted.
+- **Fix:** Changing currency now shows a confirmation dialog explaining the effect. On confirmation, the current month's starting balance and transactions are fully cleared (both in memory and in persisted storage), and the user is immediately prompted to set a new starting balance in the newly selected currency. Picking the currency already in use is a no-op.
+
 ---
 
 ## Known Limitations / Future Scope
 
 - Data is stored **locally per device only** — there's no shared backend, so transactions don't sync across devices or between users.
 - Only the current month is viewable; past months' data is retained in storage but not yet browsable in the UI.
+- Currency is a **display symbol only** — there's no real exchange-rate conversion, which is why switching currencies clears existing amounts rather than converting them.
 
 ---
 
