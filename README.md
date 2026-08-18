@@ -17,6 +17,9 @@ Built it for myself and people like me!
 - **Dark mode** — toggle between light and dark themes via the app bar icon; preference is remembered across sessions.
 - **Currency selection** — choose between ₹, $, €, and £ from the app bar; the choice persists across sessions and updates every balance/amount display and validation message throughout the app.
 - **Reset starting balance** — a confirmation-gated option to correct the starting balance mid-month, which also clears that month's logged transactions for a clean restart.
+- **Monthly History (archive)** — browse every past month in reverse chronological order via the navigation drawer, with a summary card per month (starting balance, income, expenses, net savings, ending balance). Past months are read-only — no adding, editing, or deleting.
+- **CSV export** — export the current month or any archived month as a `.csv` file (with a running balance-after-transaction column) and share it via the native share sheet.
+- **Backup & restore** — export all app data (balances, transactions, theme, currency) as a JSON backup file and share it; restore from a previously exported file, with validation and a confirmation prompt before any data is overwritten.
 
 ---
 
@@ -27,9 +30,15 @@ dependencies:
   flutter:
     sdk: flutter
   shared_preferences: ^2.3.2
+  share_plus: ^10.1.2
+  path_provider: ^2.1.4
+  file_picker: ^8.1.3
 ```
 
-No other third-party packages are required — everything else uses Flutter's built-in widgets and APIs.
+- `shared_preferences` — local persistence for balances, transactions, theme, and currency.
+- `share_plus` — opens the native share sheet for CSV exports and JSON backups.
+- `path_provider` — resolves a temp directory to write export files to before sharing.
+- `file_picker` — lets the user pick a `.json` file when restoring a backup.
 
 ---
 
@@ -39,17 +48,26 @@ The app is organized into focused files rather than one large `main.dart`:
 
 ```
 lib/
-├── main.dart                     — entry point only, calls runApp(MyApp())
-├── app.dart                      — MyApp widget: MaterialApp setup, theme mode state
+├── main.dart                       — entry point only, calls runApp(MyApp())
+├── app.dart                        — MyApp widget: MaterialApp setup, theme mode state
 ├── models/
-│   └── transaction.dart          — Transaction data class (toJson/fromJson)
+│   └── transaction.dart            — Transaction data class (toJson/fromJson)
 ├── services/
-│   └── storage_service.dart      — all SharedPreferences reads/writes (balance, transactions, theme, currency)
-└── theme/
-│   ├── app_colors.dart           — color constants
-│   └── app_theme.dart            — light/dark ThemeData
+│   ├── storage_service.dart        — all SharedPreferences reads/writes (per-month balances, transactions, theme, currency, backup export/import)
+│   ├── csv_service.dart            — builds and shares a month's transactions as CSV
+│   └── backup_service.dart         — builds/shares a full JSON backup, and validates/restores one
+├── utils/
+│   └── currency_utils.dart         — shared money formatting and month-key helpers
+├── theme/
+│   ├── app_colors.dart             — color constants
+│   └── app_theme.dart              — light/dark ThemeData
+├── widgets/
+│   ├── transaction_tile.dart       — shared transaction row (interactive or read-only)
+│   └── month_summary_card.dart     — shared balance summary card
 └── screens/
-    └── balance_home_page.dart    — main UI: balance card, search/filter, transaction list, dialogs
+    ├── balance_home_page.dart      — current month: balance card, search/filter, transaction list, drawer, dialogs
+    ├── archive_screen.dart         — Monthly History: list of past months with summary cards
+    └── month_detail_screen.dart    — read-only view of a single archived month
 ```
 
 `storage_service.dart` is the only file that talks to `shared_preferences` directly — every other file goes through it.
@@ -138,13 +156,35 @@ Three features added in this release:
 - **Issue:** Changing the currency symbol left the existing starting balance and transactions in place, even though their amounts were recorded in a different currency and can't be auto-converted.
 - **Fix:** Changing currency now shows a confirmation dialog explaining the effect. On confirmation, the current month's starting balance and transactions are fully cleared (both in memory and in persisted storage), and the user is immediately prompted to set a new starting balance in the newly selected currency. Picking the currency already in use is a no-op.
 
+### v2.0 — Monthly history, CSV export, and backup/restore
+Three major features added in this release, plus a data-model change to support them:
+
+1. **Past months' history (read-only archive)**
+   - The starting balance storage model changed from a single value + month key to a `monthKey → balance` map, so every month's starting balance is now retained rather than overwritten. A one-time migration silently upgrades data saved by earlier versions.
+   - A navigation drawer (opened from a new menu icon in the app bar) replaces what would otherwise have been a fourth app bar icon, keeping the header free of overflow risk.
+   - "Monthly History" lists every past month in reverse chronological order, each as a summary card showing Starting Balance, Total Income, Total Expenses, and Net Savings / Ending Balance.
+   - Tapping a month opens a read-only detail view — adding, editing, and swipe-to-delete are all disabled there. The current month is unaffected and remains fully interactive.
+
+2. **CSV export**
+   - "Export Month to CSV" is available for the current month (via the drawer) and for any archived month (via its detail screen).
+   - The exported file includes ID, Date, Title, Type, Amount, and a running Balance After Transaction column computed chronologically from that month's starting balance.
+   - Saved as `MonoBal_[YYYY-MM].csv` and shared through the native share sheet via `share_plus`.
+
+3. **Backup & restore (JSON)**
+   - "Data & Backups" in the drawer offers Export Backup and Import / Restore Backup.
+   - Export serializes all starting balances, transactions, dark mode preference, and currency symbol into one JSON file (`monobal_backup_YYYY_MM_DD.json`) and opens the share sheet.
+   - Restore lets the user pick a `.json` file, validates its structure before touching anything, then shows an explicit warning — *"Restoring will overwrite current local app data. Continue?"* — and only overwrites local storage on confirmation. The app automatically reloads its state afterward. Invalid or corrupted files are rejected with an error message rather than partially applied.
+
+- **New files:** `services/csv_service.dart`, `services/backup_service.dart`, `utils/currency_utils.dart`, `widgets/transaction_tile.dart`, `widgets/month_summary_card.dart`, `screens/archive_screen.dart`, `screens/month_detail_screen.dart`. See Project Structure above.
+- **New dependencies:** `share_plus`, `path_provider`, `file_picker`.
+
 ---
 
 ## Known Limitations / Future Scope
 
 - Data is stored **locally per device only** — there's no shared backend, so transactions don't sync across devices or between users.
-- Only the current month is viewable; past months' data is retained in storage but not yet browsable in the UI.
-- Currency is a **display symbol only** — there's no real exchange-rate conversion, which is why switching currencies clears existing amounts rather than converting them.
+- Currency is a **display symbol only** — there's no real exchange-rate conversion, which is why switching currencies clears the current month's amounts rather than converting them. This also means archived months from before a currency change will render their stored numbers using whatever currency symbol is *currently* selected, since the symbol isn't stored per-transaction.
+- Backups are plain, unencrypted JSON files — anyone with the file can read its contents, so treat exported backups like any other personal financial data.
 
 ---
 
