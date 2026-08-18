@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../services/backup_service.dart';
@@ -33,6 +35,9 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final StorageService _storage = StorageService();
   late final BackupService _backup = BackupService(_storage);
+
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   double _startingBalance = 0.0;
   bool _startingBalanceSet = false;
@@ -477,12 +482,19 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   Future<void> _exportCurrentMonthCsv() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await CsvService.exportAndShare(
+      final savedPath = await CsvService.exportAndShare(
         monthKey: _currentMonthKey,
         transactions: _monthTransactions,
         startingBalance: _startingBalance,
       );
-      messenger.showSnackBar(const SnackBar(content: Text('CSV exported.')));
+      if (savedPath != null) {
+        messenger.showSnackBar(SnackBar(content: Text('CSV saved to $savedPath')));
+      } else if (_isDesktop) {
+        // Desktop + null means the user cancelled the Save As dialog.
+        messenger.showSnackBar(const SnackBar(content: Text('Export cancelled.')));
+      } else {
+        messenger.showSnackBar(const SnackBar(content: Text('CSV exported.')));
+      }
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
     }
@@ -495,8 +507,14 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   Future<void> _exportBackup() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await _backup.exportAndShare();
-      messenger.showSnackBar(const SnackBar(content: Text('Backup exported.')));
+      final savedPath = await _backup.exportAndShare();
+      if (savedPath != null) {
+        messenger.showSnackBar(SnackBar(content: Text('Backup saved to $savedPath')));
+      } else if (_isDesktop) {
+        messenger.showSnackBar(const SnackBar(content: Text('Backup export cancelled.')));
+      } else {
+        messenger.showSnackBar(const SnackBar(content: Text('Backup exported.')));
+      }
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Backup failed: $e')));
     }

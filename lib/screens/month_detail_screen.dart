@@ -1,9 +1,14 @@
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../services/csv_service.dart';
 import '../utils/currency_utils.dart';
 import '../widgets/month_summary_card.dart';
 import '../widgets/transaction_tile.dart';
+
+bool get _isDesktop =>
+    !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
 /// Read-only view of a single archived (past) month. No adding, editing,
 /// or deleting — this is historical record.
@@ -33,11 +38,18 @@ class MonthDetailScreen extends StatelessWidget {
   Future<void> _exportCsv(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await CsvService.exportAndShare(
+      final savedPath = await CsvService.exportAndShare(
         monthKey: monthKey,
         transactions: transactions,
         startingBalance: startingBalance,
       );
+      if (savedPath != null) {
+        messenger.showSnackBar(SnackBar(content: Text('CSV saved to $savedPath')));
+      } else if (_isDesktop) {
+        messenger.showSnackBar(const SnackBar(content: Text('Export cancelled.')));
+      } else {
+        messenger.showSnackBar(const SnackBar(content: Text('CSV exported.')));
+      }
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text('Export failed: $e')),

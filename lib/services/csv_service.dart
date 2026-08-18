@@ -1,11 +1,25 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/transaction.dart';
 import '../utils/currency_utils.dart';
 
-/// Builds a CSV export for a single month's transactions and hands it to
-/// the native share sheet via share_plus.
+bool get _isDesktop =>
+    !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
+/// Builds a CSV export for a single month's transactions and saves/shares
+/// it depending on platform.
+///
+/// share_plus's file-attachment support on Windows/Linux desktop is
+/// unreliable (it can silently drop the file and only pass through the
+/// share text), so desktop platforms use file_picker's native "Save As"
+/// dialog instead — writing the CSV directly to a location the user picks.
+/// Mobile (Android/iOS) keeps using the native share sheet, which works
+/// reliably there.
 class CsvService {
   CsvService._();
 
@@ -42,10 +56,12 @@ class CsvService {
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
 
-  /// Writes the CSV to a temporary file named MonoBal_[YYYY-MM].csv and
-  /// opens the native share sheet. Throws on failure — callers should wrap
-  /// this in a try/catch and show a SnackBar.
-  static Future<void> exportAndShare({
+  /// Returns a short human-readable result string on success (e.g. the
+  /// saved file path on desktop, or null on mobile since the share sheet
+  /// handles the rest). Returns null if the user cancelled a desktop save
+  /// dialog. Throws on failure — callers should wrap this in a try/catch
+  /// and show a SnackBar.
+  static Future<String?> exportAndShare({
     required String monthKey,
     required List<Transaction> transactions,
     required double startingBalance,
@@ -54,9 +70,19 @@ class CsvService {
       transactions: transactions,
       startingBalance: startingBalance,
     );
-
-    final dir = await getTemporaryDirectory();
     final filename = 'MonoBal_${paddedMonthKey(monthKey)}.csv';
+
+    if (_isDesktop) {
+      final savedPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save CSV Export',
+        fileName: filename,
+        bytes: Uint8List.fromList(utf8.encode(csv)),
+      );
+      return savedPath; // null if the user cancelled the dialog
+    }
+
+    // Mobile: write to a temp file and hand off to the native share sheet.
+    final dir = await getTemporaryDirectory();
     final file = File('${dir.path}/$filename');
     await file.writeAsString(csv);
 
@@ -64,5 +90,6 @@ class CsvService {
       [XFile(file.path)],
       text: 'MonoBal export — ${monthKeyToLabel(monthKey)}',
     );
+    return null;
   }
 }

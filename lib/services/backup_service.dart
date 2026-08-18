@@ -1,9 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'storage_service.dart';
+
+bool get _isDesktop =>
+    !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
 /// Thrown when a picked backup file doesn't have the expected MonoBal
 /// backup structure.
@@ -30,21 +35,34 @@ class BackupService {
     return 'monobal_backup_${y}_${m}_$d.json';
   }
 
-  /// Builds the backup JSON file and opens the native share sheet.
+  /// Builds the backup JSON file and saves/shares it depending on platform.
+  /// Returns the saved file path on desktop (null if the user cancelled the
+  /// save dialog), or null on mobile since the share sheet handles the rest.
   /// Throws on failure — callers should wrap this in a try/catch and show
   /// a SnackBar.
-  Future<void> exportAndShare() async {
+  Future<String?> exportAndShare() async {
     final data = await storage.exportAllData();
     final jsonStr = const JsonEncoder.withIndent('  ').convert(data);
+    final filename = _todayFilename();
+
+    if (_isDesktop) {
+      final savedPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save Backup',
+        fileName: filename,
+        bytes: Uint8List.fromList(utf8.encode(jsonStr)),
+      );
+      return savedPath; // null if the user cancelled the dialog
+    }
 
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/${_todayFilename()}');
+    final file = File('${dir.path}/$filename');
     await file.writeAsString(jsonStr);
 
     await Share.shareXFiles(
       [XFile(file.path)],
       text: 'MonoBal backup',
     );
+    return null;
   }
 
   /// Lets the user pick a .json backup file, validates its structure, and
