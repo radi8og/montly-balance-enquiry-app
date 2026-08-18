@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import '../models/transaction.dart';
+import '../services/backup_service.dart';
+import '../services/csv_service.dart';
 import '../services/storage_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/currency_utils.dart';
+import '../widgets/month_summary_card.dart';
+import '../widgets/transaction_tile.dart';
+import 'archive_screen.dart';
 
 /// Which subset of this month's transactions to show.
 enum TransactionFilter { all, income, expense }
@@ -25,6 +31,7 @@ class BalanceHomePage extends StatefulWidget {
 
 class _BalanceHomePageState extends State<BalanceHomePage> {
   final StorageService _storage = StorageService();
+  late final BackupService _backup = BackupService(_storage);
 
   double _startingBalance = 0.0;
   bool _startingBalanceSet = false;
@@ -38,8 +45,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
 
   final DateTime _currentMonth = DateTime.now();
 
-  String get _currentMonthKey =>
-      '${_currentMonth.year}-${_currentMonth.month}';
+  String get _currentMonthKey => monthKeyFor(_currentMonth);
 
   // ---------------------------------------------------------------------
   // Lifecycle / loading
@@ -52,21 +58,20 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   }
 
   Future<void> _loadData() async {
-    final savedBalance = await _storage.getStartingBalance();
-    final savedMonthKey = await _storage.getBalanceMonthKey();
-    final savedTransactions = await _storage.getTransactions();
+    await _storage.migrateLegacyBalanceIfNeeded();
+
+    final savedBalance = await _storage.getStartingBalanceForMonth(_currentMonthKey);
+    final allTransactions = await _storage.getTransactions();
     final savedCurrency = await _storage.getCurrencySymbol();
 
-    _transactions.addAll(savedTransactions);
-
-    // Only reuse the saved balance if it was set for THIS month.
-    final validForThisMonth =
-        savedBalance != null && savedMonthKey == _currentMonthKey;
+    _transactions
+      ..clear()
+      ..addAll(allTransactions);
 
     setState(() {
       _isLoading = false;
       _currencySymbol = savedCurrency;
-      if (validForThisMonth) {
+      if (savedBalance != null) {
         _startingBalance = savedBalance;
         _startingBalanceSet = true;
       } else {
@@ -79,52 +84,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     }
   }
 
-  Future<void> _applyCurrencyChange(String symbol) async {
-    setState(() {
-      _currencySymbol = symbol;
-      _transactions.removeWhere((t) =>
-          t.date.year == _currentMonth.year &&
-          t.date.month == _currentMonth.month);
-      _startingBalanceSet = false;
-      _startingBalance = 0.0;
-    });
-    await _storage.setCurrencySymbol(symbol);
-    await _storage.saveTransactions(_transactions);
-    await _storage.clearStartingBalance();
-    _promptStartingBalance();
-  }
-
-  void _confirmCurrencyChange(String symbol) {
-    if (symbol == _currencySymbol) return; // no actual change
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Change Currency?'),
-        content: Text(
-          'Switching to $symbol will clear this month\'s starting balance '
-          'and all logged transactions, since amounts recorded in the old '
-          'currency can\'t be converted automatically. You\'ll be asked to '
-          'set a new starting balance in $symbol.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _applyCurrencyChange(symbol);
-            },
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _money(double amount) => '$_currencySymbol${amount.toStringAsFixed(2)}';
+  String _money(double amount) => formatMoney(_currencySymbol, amount);
 
   // ---------------------------------------------------------------------
   // Derived data
@@ -133,8 +93,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   double get _monthTotal {
     double total = 0;
     for (var t in _transactions) {
-      if (t.date.year == _currentMonth.year &&
-          t.date.month == _currentMonth.month) {
+      if (monthKeyFor(t.date) == _currentMonthKey) {
         total += t.amount;
       }
     }
@@ -145,9 +104,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
 
   List<Transaction> get _monthTransactions {
     final list = _transactions
-        .where((t) =>
-            t.date.year == _currentMonth.year &&
-            t.date.month == _currentMonth.month)
+        .where((t) => monthKeyFor(t.date) == _currentMonthKey)
         .toList();
     list.sort((a, b) => b.date.compareTo(a.date));
     return list;
@@ -156,8 +113,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   /// Month transactions after applying the search query and filter chip.
   List<Transaction> get _visibleTransactions {
     return _monthTransactions.where((t) {
-      final matchesQuery =
-          _searchQuery.isEmpty ||
+      final matchesQuery = _searchQuery.isEmpty ||
           t.title.toLowerCase().contains(_searchQuery.toLowerCase());
 
       final isExpense = t.amount < 0;
@@ -171,13 +127,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     }).toList();
   }
 
-  String _monthLabel() {
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    return '${months[_currentMonth.month - 1]} ${_currentMonth.year}';
-  }
+  String _monthLabel() => monthKeyToLabel(_currentMonthKey);
 
   // ---------------------------------------------------------------------
   // Starting balance dialog
@@ -200,8 +150,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
           ),
           content: TextField(
             controller: controller,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
               prefixText: '$_currencySymbol ',
               hintText: 'Enter your current balance',
@@ -218,27 +167,22 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
               onPressed: () async {
                 final value = double.tryParse(controller.text);
                 if (value == null) {
-                  setDialogState(() {
-                    errorText = 'Enter a valid amount';
-                  });
+                  setDialogState(() => errorText = 'Enter a valid amount');
                   return;
                 }
                 if (value < 0) {
-                  setDialogState(() {
-                    errorText = 'Balance cannot be negative';
-                  });
+                  setDialogState(() => errorText = 'Balance cannot be negative');
                   return;
                 }
                 setState(() {
                   if (isResetting) {
-                    _transactions.removeWhere((t) =>
-                        t.date.year == _currentMonth.year &&
-                        t.date.month == _currentMonth.month);
+                    _transactions.removeWhere(
+                        (t) => monthKeyFor(t.date) == _currentMonthKey);
                   }
                   _startingBalance = value;
                   _startingBalanceSet = true;
                 });
-                await _storage.saveStartingBalance(value, _currentMonthKey);
+                await _storage.setStartingBalanceForMonth(_currentMonthKey, value);
                 await _storage.saveTransactions(_transactions);
                 if (context.mounted) Navigator.pop(context);
               },
@@ -278,6 +222,53 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   }
 
   // ---------------------------------------------------------------------
+  // Currency
+  // ---------------------------------------------------------------------
+
+  Future<void> _applyCurrencyChange(String symbol) async {
+    setState(() {
+      _currencySymbol = symbol;
+      _transactions.removeWhere((t) => monthKeyFor(t.date) == _currentMonthKey);
+      _startingBalanceSet = false;
+      _startingBalance = 0.0;
+    });
+    await _storage.setCurrencySymbol(symbol);
+    await _storage.saveTransactions(_transactions);
+    await _storage.clearStartingBalanceForMonth(_currentMonthKey);
+    _promptStartingBalance();
+  }
+
+  void _confirmCurrencyChange(String symbol) {
+    if (symbol == _currencySymbol) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Change Currency?'),
+        content: Text(
+          'Switching to $symbol will clear this month\'s starting balance '
+          'and all logged transactions, since amounts recorded in the old '
+          'currency can\'t be converted automatically. You\'ll be asked to '
+          'set a new starting balance in $symbol.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _applyCurrencyChange(symbol);
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------
   // Add transaction
   // ---------------------------------------------------------------------
 
@@ -301,8 +292,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
               ),
               TextField(
                 controller: amountController,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Amount',
                   prefixText: '$_currencySymbol ',
@@ -322,28 +312,21 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 final title = titleController.text.trim();
 
                 if (!isExpense && _currentBalance == 0) {
-                  setDialogState(() {
-                    errorText = 'Please add sufficient balance amount.';
-                  });
+                  setDialogState(
+                      () => errorText = 'Please add sufficient balance amount.');
                   return;
                 }
                 if (amount == null || amount <= 0) {
-                  setDialogState(() {
-                    errorText = 'Enter a valid amount';
-                  });
+                  setDialogState(() => errorText = 'Enter a valid amount');
                   return;
                 }
                 if (title.isEmpty) {
-                  setDialogState(() {
-                    errorText = null;
-                  });
+                  setDialogState(() => errorText = null);
                   return;
                 }
                 if (isExpense && amount > _currentBalance) {
-                  setDialogState(() {
-                    errorText =
-                        'Insufficient balance (${_money(_currentBalance)} available)';
-                  });
+                  setDialogState(() => errorText =
+                      'Insufficient balance (${_money(_currentBalance)} available)');
                   return;
                 }
 
@@ -369,20 +352,16 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   }
 
   // ---------------------------------------------------------------------
-  // Edit transaction  (v1.9)
+  // Edit transaction
   // ---------------------------------------------------------------------
 
   void _editTransaction(Transaction original) {
     final isExpense = original.amount < 0;
     final titleController = TextEditingController(text: original.title);
-    final amountController = TextEditingController(
-      text: original.amount.abs().toStringAsFixed(2),
-    );
+    final amountController =
+        TextEditingController(text: original.amount.abs().toStringAsFixed(2));
     String? errorText;
 
-    // Balance as if this transaction didn't exist yet — lets the user
-    // re-save the same or a smaller amount without being falsely blocked
-    // by its own previous contribution to the balance.
     final balanceExcludingThis = _currentBalance - original.amount;
 
     showDialog(
@@ -400,8 +379,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
               ),
               TextField(
                 controller: amountController,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Amount',
                   prefixText: '$_currencySymbol ',
@@ -421,22 +399,16 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 final title = titleController.text.trim();
 
                 if (amount == null || amount <= 0) {
-                  setDialogState(() {
-                    errorText = 'Enter a valid amount';
-                  });
+                  setDialogState(() => errorText = 'Enter a valid amount');
                   return;
                 }
                 if (title.isEmpty) {
-                  setDialogState(() {
-                    errorText = null;
-                  });
+                  setDialogState(() => errorText = null);
                   return;
                 }
                 if (isExpense && amount > balanceExcludingThis) {
-                  setDialogState(() {
-                    errorText =
-                        'Insufficient balance (${_money(balanceExcludingThis)} available)';
-                  });
+                  setDialogState(() => errorText =
+                      'Insufficient balance (${_money(balanceExcludingThis)} available)');
                   return;
                 }
 
@@ -448,7 +420,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                       id: original.id,
                       title: title,
                       amount: isExpense ? -amount : amount,
-                      date: original.date, // keep the original entry date
+                      date: original.date,
                     );
                   }
                 });
@@ -498,6 +470,106 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   }
 
   // ---------------------------------------------------------------------
+  // CSV export (current month)
+  // ---------------------------------------------------------------------
+
+  Future<void> _exportCurrentMonthCsv() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await CsvService.exportAndShare(
+        monthKey: _currentMonthKey,
+        transactions: _monthTransactions,
+        startingBalance: _startingBalance,
+      );
+      messenger.showSnackBar(const SnackBar(content: Text('CSV exported.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Backup / Restore
+  // ---------------------------------------------------------------------
+
+  Future<void> _exportBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _backup.exportAndShare();
+      messenger.showSnackBar(const SnackBar(content: Text('Backup exported.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Backup failed: $e')));
+    }
+  }
+
+  Future<void> _importBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    Map<String, dynamic>? data;
+
+    try {
+      data = await _backup.pickAndValidateBackup();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Restore failed: $e')));
+      return;
+    }
+
+    if (data == null) return; // user cancelled the file picker
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore Backup?'),
+        content: const Text(
+          'Restoring will overwrite current local app data. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restore', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _backup.applyRestore(data);
+      setState(() {
+        _isLoading = true;
+        _transactions.clear();
+      });
+      await _loadData();
+      if (mounted) {
+        messenger.showSnackBar(
+            const SnackBar(content: Text('Backup restored successfully.')));
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Restore failed: $e')));
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Navigation
+  // ---------------------------------------------------------------------
+
+  void _openArchive() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ArchiveScreen(
+          currencySymbol: _currencySymbol,
+          currentMonthKey: _currentMonthKey,
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------
 
@@ -528,67 +600,94 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 widthFactor: 1,
                 child: Text(
                   _currencySymbol,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
           ),
           IconButton(
-            icon: Icon(
-              widget.isDarkMode ? Icons.light_mode : Icons.dark_mode,
-            ),
-            tooltip: widget.isDarkMode
-                ? 'Switch to light mode'
-                : 'Switch to dark mode',
+            icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
+            tooltip: widget.isDarkMode ? 'Switch to light mode' : 'Switch to dark mode',
             onPressed: widget.onToggleTheme,
           ),
-          IconButton(
-            icon: const Icon(Icons.edit),
-            tooltip: 'Reset starting balance',
-            onPressed: _confirmResetBalance,
-          ),
         ],
+      ),
+      drawer: Drawer(
+        child: SafeArea(
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              DrawerHeader(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                ),
+                child: Row(
+                  children: [
+                    Image.asset('assets/icon/icon.png', width: 48, height: 48),
+                    const SizedBox(width: 12),
+                    const Text('MonoBal', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_month),
+                title: const Text('Monthly History'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _openArchive();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.restart_alt),
+                title: const Text('Reset Starting Balance'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _confirmResetBalance();
+                },
+              ),
+              const Divider(),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Text('Data & Backups',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.ios_share),
+                title: const Text('Export Month to CSV'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _exportCurrentMonthCsv();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.backup),
+                title: const Text('Export Backup (JSON)'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _exportBackup();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.restore),
+                title: const Text('Import / Restore Backup'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _importBackup();
+                },
+              ),
+            ],
+          ),
+        ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  child: Column(
-                    children: [
-                      const Text(
-                        'Current Balance',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _money(_currentBalance),
-                        style: const TextStyle(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'This month: ${_monthTotal >= 0 ? '+' : ''}${_money(_monthTotal)}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: _monthTotal >= 0
-                              ? AppColors.incomeText(context)
-                              : AppColors.expenseText(context),
-                        ),
-                      ),
-                    ],
-                  ),
+                MonthSummaryCard(
+                  balance: _currentBalance,
+                  netForMonth: _monthTotal,
+                  currencySymbol: _currencySymbol,
                 ),
-
-                // ---- Search + filter bar (v1.9) ----
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: TextField(
@@ -597,9 +696,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                       hintText: 'Search transactions',
                       prefixIcon: const Icon(Icons.search),
                       isDense: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
@@ -612,28 +709,24 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                         ChoiceChip(
                           label: const Text('All'),
                           selected: _filter == TransactionFilter.all,
-                          onSelected: (_) =>
-                              setState(() => _filter = TransactionFilter.all),
+                          onSelected: (_) => setState(() => _filter = TransactionFilter.all),
                         ),
                         const SizedBox(width: 8),
                         ChoiceChip(
                           label: const Text('Income'),
                           selected: _filter == TransactionFilter.income,
-                          onSelected: (_) => setState(
-                              () => _filter = TransactionFilter.income),
+                          onSelected: (_) => setState(() => _filter = TransactionFilter.income),
                         ),
                         const SizedBox(width: 8),
                         ChoiceChip(
                           label: const Text('Expenses'),
                           selected: _filter == TransactionFilter.expense,
-                          onSelected: (_) => setState(
-                              () => _filter = TransactionFilter.expense),
+                          onSelected: (_) => setState(() => _filter = TransactionFilter.expense),
                         ),
                       ],
                     ),
                   ),
                 ),
-
                 Expanded(
                   child: _visibleTransactions.isEmpty
                       ? Center(
@@ -649,58 +742,11 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                           itemCount: _visibleTransactions.length,
                           itemBuilder: (context, index) {
                             final t = _visibleTransactions[index];
-                            final isExpense = t.amount < 0;
-                            return Dismissible(
-                              key: ValueKey(t.id),
-                              direction: DismissDirection.endToStart,
-                              background: Container(
-                                alignment: Alignment.centerRight,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 20),
-                                color: AppColors.expense,
-                                child: const Icon(Icons.delete,
-                                    color: Colors.white),
-                              ),
-                              confirmDismiss: (_) async {
-                                _confirmDelete(t);
-                                return false; // dialog handles removal
-                              },
-                              child: ListTile(
-                                onTap: () => _editTransaction(t),
-                                leading: Icon(
-                                  isExpense
-                                      ? Icons.arrow_downward
-                                      : Icons.arrow_upward,
-                                  color: isExpense
-                                      ? AppColors.expense
-                                      : AppColors.income,
-                                ),
-                                title: Text(t.title),
-                                subtitle: Text(
-                                  '${t.date.day}/${t.date.month}/${t.date.year}',
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      '${isExpense ? '-' : '+'}${_money(t.amount.abs())}',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: isExpense
-                                            ? AppColors.expense
-                                            : AppColors.income,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline,
-                                          size: 20),
-                                      color: Colors.grey,
-                                      onPressed: () => _confirmDelete(t),
-                                      tooltip: 'Delete',
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            return TransactionTile(
+                              transaction: t,
+                              currencySymbol: _currencySymbol,
+                              onTap: () => _editTransaction(t),
+                              onDelete: () => _confirmDelete(t),
                             );
                           },
                         ),
