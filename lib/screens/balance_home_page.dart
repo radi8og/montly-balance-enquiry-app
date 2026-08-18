@@ -30,6 +30,7 @@ class BalanceHomePage extends StatefulWidget {
 }
 
 class _BalanceHomePageState extends State<BalanceHomePage> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final StorageService _storage = StorageService();
   late final BackupService _backup = BackupService(_storage);
 
@@ -576,6 +577,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       appBar: AppBar(
         leading: Padding(
           padding: const EdgeInsets.all(8.0),
@@ -584,6 +586,11 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
         title: Text(_monthLabel()),
         centerTitle: false,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.menu),
+            tooltip: 'Menu',
+            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          ),
           PopupMenuButton<String>(
             tooltip: 'Change currency',
             initialValue: _currencySymbol,
