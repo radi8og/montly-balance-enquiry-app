@@ -11,6 +11,7 @@ import '../utils/currency_utils.dart';
 import '../widgets/month_summary_card.dart';
 import '../widgets/transaction_tile.dart';
 import 'archive_screen.dart';
+import 'category_breakdown_screen.dart';
 import 'recurring_transactions_screen.dart';
 
 /// Which subset of this month's transactions to show.
@@ -696,6 +697,19 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     if (mounted) _loadData();
   }
 
+  void _openCategoryBreakdown() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CategoryBreakdownScreen(
+          monthLabel: _monthLabel(),
+          transactions: _monthTransactions,
+          currencySymbol: _currencySymbol,
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------
@@ -776,6 +790,14 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 onTap: () {
                   Navigator.pop(context);
                   _openRecurringScreen();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.pie_chart),
+                title: const Text('Category Breakdown'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _openCategoryBreakdown();
                 },
               ),
               ListTile(

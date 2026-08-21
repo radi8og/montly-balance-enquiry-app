@@ -6,6 +6,7 @@ import '../services/csv_service.dart';
 import '../utils/currency_utils.dart';
 import '../widgets/month_summary_card.dart';
 import '../widgets/transaction_tile.dart';
+import 'category_breakdown_screen.dart';
 
 bool get _isDesktop =>
     !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
@@ -63,6 +64,22 @@ class MonthDetailScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text(monthKeyToLabel(monthKey)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.pie_chart),
+            tooltip: 'Category Breakdown',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CategoryBreakdownScreen(
+                    monthLabel: monthKeyToLabel(monthKey),
+                    transactions: transactions,
+                    currencySymbol: currencySymbol,
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.ios_share),
             tooltip: 'Export Month to CSV',
