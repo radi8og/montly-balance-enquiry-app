@@ -51,7 +51,14 @@ class BackupService {
         fileName: filename,
         bytes: Uint8List.fromList(utf8.encode(jsonStr)),
       );
-      return savedPath; // null if the user cancelled the dialog
+      if (savedPath == null) return null; // user cancelled the dialog
+
+      // file_picker's saveFile() only returns the chosen path on desktop —
+      // it does NOT write the bytes itself there (unlike mobile/web), so we
+      // have to write the file ourselves.
+      final file = File(savedPath);
+      await file.writeAsString(jsonStr);
+      return savedPath;
     }
 
     final dir = await getTemporaryDirectory();
