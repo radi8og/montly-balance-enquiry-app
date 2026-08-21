@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../theme/app_colors.dart';
+import '../utils/category_utils.dart';
 import '../utils/currency_utils.dart';
 
 /// A single transaction row, reused by both the current-month (interactive)
@@ -31,12 +32,12 @@ class TransactionTile extends StatelessWidget {
     final tile = ListTile(
       onTap: readOnly ? null : onTap,
       leading: Icon(
-        isExpense ? Icons.arrow_downward : Icons.arrow_upward,
+        categoryIcon(transaction.category),
         color: isExpense ? AppColors.expense : AppColors.income,
       ),
       title: Text(transaction.title),
       subtitle: Text(
-        '${transaction.date.day}/${transaction.date.month}/${transaction.date.year}',
+        '${transaction.category} · ${transaction.date.day}/${transaction.date.month}/${transaction.date.year}',
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

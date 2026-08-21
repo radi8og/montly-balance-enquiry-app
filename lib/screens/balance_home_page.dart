@@ -6,6 +6,7 @@ import '../services/backup_service.dart';
 import '../services/csv_service.dart';
 import '../services/storage_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/category_utils.dart';
 import '../utils/currency_utils.dart';
 import '../widgets/month_summary_card.dart';
 import '../widgets/transaction_tile.dart';
@@ -282,6 +283,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     final titleController = TextEditingController();
     final amountController = TextEditingController();
     String? errorText;
+    String selectedCategory = categoriesFor(isExpense: isExpense).first;
 
     showDialog(
       context: context,
@@ -304,6 +306,29 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                   prefixText: '$_currencySymbol ',
                   errorText: errorText,
                 ),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: selectedCategory,
+                decoration: const InputDecoration(labelText: 'Category'),
+                items: categoriesFor(isExpense: isExpense)
+                    .map((c) => DropdownMenuItem(
+                          value: c,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(categoryIcon(c), size: 18),
+                              const SizedBox(width: 8),
+                              Text(c),
+                            ],
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => selectedCategory = value);
+                  }
+                },
               ),
             ],
           ),
@@ -343,6 +368,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                       title: title,
                       amount: isExpense ? -amount : amount,
                       date: DateTime.now(),
+                      category: selectedCategory,
                     ),
                   );
                 });
@@ -368,6 +394,10 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
         TextEditingController(text: original.amount.abs().toStringAsFixed(2));
     String? errorText;
 
+    final categoryOptions = categoriesFor(isExpense: isExpense);
+    String selectedCategory =
+        categoryOptions.contains(original.category) ? original.category : categoryOptions.first;
+
     final balanceExcludingThis = _currentBalance - original.amount;
 
     showDialog(
@@ -391,6 +421,29 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                   prefixText: '$_currencySymbol ',
                   errorText: errorText,
                 ),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: selectedCategory,
+                decoration: const InputDecoration(labelText: 'Category'),
+                items: categoryOptions
+                    .map((c) => DropdownMenuItem(
+                          value: c,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(categoryIcon(c), size: 18),
+                              const SizedBox(width: 8),
+                              Text(c),
+                            ],
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => selectedCategory = value);
+                  }
+                },
               ),
             ],
           ),
@@ -427,6 +480,7 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                       title: title,
                       amount: isExpense ? -amount : amount,
                       date: original.date,
+                      category: selectedCategory,
                     );
                   }
                 });

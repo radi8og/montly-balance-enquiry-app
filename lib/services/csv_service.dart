@@ -35,7 +35,7 @@ class CsvService {
       ..sort((a, b) => a.date.compareTo(b.date));
 
     final buffer = StringBuffer();
-    buffer.writeln('ID,Date,Title,Type,Amount,Balance After Transaction');
+    buffer.writeln('ID,Date,Title,Category,Type,Amount,Balance After Transaction');
 
     double running = startingBalance;
     for (final t in sorted) {
@@ -45,7 +45,7 @@ class CsvService {
       final dateStr = _formatDate(t.date);
       final safeTitle = t.title.replaceAll('"', '""');
       buffer.writeln(
-          '${t.id},$dateStr,"$safeTitle",$type,$amountStr,${running.toStringAsFixed(2)}');
+          '${t.id},$dateStr,"$safeTitle",${t.category},$type,$amountStr,${running.toStringAsFixed(2)}');
     }
 
     return buffer.toString();

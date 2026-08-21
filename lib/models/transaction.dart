@@ -3,17 +3,23 @@
 /// [amount] is positive for income and negative for expenses — this keeps
 /// balance math (`starting balance + sum of amounts`) simple everywhere else
 /// in the app.
+///
+/// [category] tags the transaction (e.g. Food, Rent, Salary). Transactions
+/// saved before this field existed won't have one — [fromJson] defaults
+/// those to "Other" so old backups and saved data keep loading correctly.
 class Transaction {
   final String id;
   final String title;
   final double amount;
   final DateTime date;
+  final String category;
 
   Transaction({
     required this.id,
     required this.title,
     required this.amount,
     required this.date,
+    this.category = 'Other',
   });
 
   Map<String, dynamic> toJson() => {
@@ -21,6 +27,7 @@ class Transaction {
         'title': title,
         'amount': amount,
         'date': date.toIso8601String(),
+        'category': category,
       };
 
   factory Transaction.fromJson(Map<String, dynamic> json) => Transaction(
@@ -29,5 +36,6 @@ class Transaction {
         title: json['title'] as String,
         amount: (json['amount'] as num).toDouble(),
         date: DateTime.parse(json['date'] as String),
+        category: json['category'] as String? ?? 'Other',
       );
 }
