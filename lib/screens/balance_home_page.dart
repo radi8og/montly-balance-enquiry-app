@@ -11,6 +11,7 @@ import '../utils/currency_utils.dart';
 import '../widgets/month_summary_card.dart';
 import '../widgets/transaction_tile.dart';
 import 'archive_screen.dart';
+import 'recurring_transactions_screen.dart';
 
 /// Which subset of this month's transactions to show.
 enum TransactionFilter { all, income, expense }
@@ -75,6 +76,8 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
       ..clear()
       ..addAll(allTransactions);
 
+    await _processRecurringTransactions();
+
     setState(() {
       _isLoading = false;
       _currencySymbol = savedCurrency;
@@ -88,6 +91,43 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
 
     if (!_startingBalanceSet) {
       _promptStartingBalance();
+    }
+  }
+
+  /// Auto-generates a real Transaction for the current month for every
+  /// active recurring template that hasn't already been applied this
+  /// month. Tracked separately from the transaction list itself, so
+  /// deleting a generated transaction later doesn't cause it to silently
+  /// reappear on the next app launch.
+  Future<void> _processRecurringTransactions() async {
+    final templates = await _storage.getRecurringTransactions();
+    if (templates.isEmpty) return;
+
+    final processed = await _storage.getProcessedRecurringKeys();
+    bool changed = false;
+
+    for (final template in templates) {
+      if (!template.active) continue;
+      final key = '${template.id}|$_currentMonthKey';
+      if (processed.contains(key)) continue;
+
+      _transactions.add(
+        Transaction(
+          id: '${template.id}_$_currentMonthKey',
+          title: template.title,
+          amount: template.amount,
+          date: DateTime(_currentMonth.year, _currentMonth.month, 1),
+          category: template.category,
+          recurringId: template.id,
+        ),
+      );
+      processed.add(key);
+      changed = true;
+    }
+
+    if (changed) {
+      await _storage.saveTransactions(_transactions);
+      await _storage.saveProcessedRecurringKeys(processed);
     }
   }
 
@@ -642,6 +682,20 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
     );
   }
 
+  Future<void> _openRecurringScreen() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RecurringTransactionsScreen(
+          currencySymbol: _currencySymbol,
+        ),
+      ),
+    );
+    // Reload so any new/edited/reactivated recurring rule is applied to the
+    // current month right away, instead of waiting for the next app launch.
+    if (mounted) _loadData();
+  }
+
   // ---------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------
@@ -714,6 +768,14 @@ class _BalanceHomePageState extends State<BalanceHomePage> {
                 onTap: () {
                   Navigator.pop(context);
                   _openArchive();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.repeat),
+                title: const Text('Recurring Transactions'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _openRecurringScreen();
                 },
               ),
               ListTile(

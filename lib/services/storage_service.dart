@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/recurring_transaction.dart';
 import '../models/transaction.dart';
 
 /// Central place for every piece of data the app persists locally via
@@ -15,6 +16,8 @@ class StorageService {
   static const _kTransactionsKey = 'transactions';
   static const _kDarkModeKey = 'dark_mode';
   static const _kCurrencySymbolKey = 'currency_symbol';
+  static const _kRecurringTransactionsKey = 'recurring_transactions';
+  static const _kRecurringProcessedKey = 'recurring_processed_months'; // List<"recurringId|monthKey">
 
   // Legacy v1.x keys — only read once, for migration.
   static const _kLegacyStartingBalanceKey = 'starting_balance';
@@ -112,6 +115,39 @@ class StorageService {
     await prefs.setString(_kCurrencySymbolKey, symbol);
   }
 
+  // ---- Recurring transaction templates ----
+
+  Future<List<RecurringTransaction>> getRecurringTransactions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final json = prefs.getString(_kRecurringTransactionsKey);
+    if (json == null) return [];
+    final List decoded = jsonDecode(json) as List;
+    return decoded
+        .map((e) => RecurringTransaction.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> saveRecurringTransactions(List<RecurringTransaction> items) async {
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = jsonEncode(items.map((r) => r.toJson()).toList());
+    await prefs.setString(_kRecurringTransactionsKey, encoded);
+  }
+
+  /// Tracks which "recurringId|monthKey" combinations have already been
+  /// auto-generated, so a rule is never applied twice for the same month —
+  /// even if the user later deletes the generated transaction (it won't
+  /// silently come back).
+  Future<Set<String>> getProcessedRecurringKeys() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_kRecurringProcessedKey);
+    return list?.toSet() ?? {};
+  }
+
+  Future<void> saveProcessedRecurringKeys(Set<String> keys) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kRecurringProcessedKey, keys.toList());
+  }
+
   // ---- Backup / Restore ----
 
   /// Bundles every piece of app data into one JSON-serializable map.
@@ -119,6 +155,8 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     final transactionsJson = prefs.getString(_kTransactionsKey);
     final balancesJson = prefs.getString(_kStartingBalancesKey);
+    final recurringJson = prefs.getString(_kRecurringTransactionsKey);
+    final processedList = prefs.getStringList(_kRecurringProcessedKey);
 
     return {
       'backup_version': 2,
@@ -129,6 +167,9 @@ class StorageService {
           balancesJson != null ? jsonDecode(balancesJson) : {},
       'dark_mode': prefs.getBool(_kDarkModeKey) ?? false,
       'currency_symbol': prefs.getString(_kCurrencySymbolKey) ?? '₹',
+      'recurring_transactions':
+          recurringJson != null ? jsonDecode(recurringJson) : [],
+      'recurring_processed_months': processedList ?? [],
     };
   }
 
@@ -149,5 +190,16 @@ class StorageService {
     await prefs.setBool(_kDarkModeKey, data['dark_mode'] as bool? ?? false);
     await prefs.setString(
         _kCurrencySymbolKey, data['currency_symbol'] as String? ?? '₹');
+
+    // These two keys are optional — older backups (pre-recurring feature)
+    // won't have them, so default to empty rather than failing to restore.
+    final recurring = data['recurring_transactions'];
+    await prefs.setString(
+        _kRecurringTransactionsKey, jsonEncode(recurring is List ? recurring : []));
+
+    final processed = data['recurring_processed_months'];
+    await prefs.setStringList(
+        _kRecurringProcessedKey,
+        processed is List ? processed.map((e) => e.toString()).toList() : []);
   }
 }

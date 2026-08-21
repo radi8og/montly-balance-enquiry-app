@@ -35,7 +35,16 @@ class TransactionTile extends StatelessWidget {
         categoryIcon(transaction.category),
         color: isExpense ? AppColors.expense : AppColors.income,
       ),
-      title: Text(transaction.title),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(child: Text(transaction.title, overflow: TextOverflow.ellipsis)),
+          if (transaction.recurringId != null) ...[
+            const SizedBox(width: 6),
+            Icon(Icons.repeat, size: 14, color: Colors.grey[600]),
+          ],
+        ],
+      ),
       subtitle: Text(
         '${transaction.category} · ${transaction.date.day}/${transaction.date.month}/${transaction.date.year}',
       ),
