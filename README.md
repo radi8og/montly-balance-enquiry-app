@@ -20,6 +20,9 @@ Built it for myself and people like me!
 - **Monthly History (archive)** — browse every past month in reverse chronological order via the navigation drawer, with a summary card per month (starting balance, income, expenses, net savings, ending balance). Past months are read-only — no adding, editing, or deleting.
 - **CSV export** — export the current month or any archived month as a `.csv` file (with a running balance-after-transaction column) and share it via the native share sheet.
 - **Backup & restore** — export all app data (balances, transactions, theme, currency) as a JSON backup file and share it; restore from a previously exported file, with validation and a confirmation prompt before any data is overwritten.
+- **Category tags** — tag each transaction with a category (Food, Rent, Salary, Entertainment, and more), shown as an icon and label on every transaction row and included in CSV exports.
+- **Recurring transactions** — set up fixed monthly items (Rent, Salary, subscriptions) that automatically generate a real transaction on the 1st of every month, with the option to pause or delete a rule at any time.
+- **Category breakdown chart** — a pie chart with a legend showing where money went (or came from) this month or in any archived month, broken down by category with amounts and percentages.
 
 ---
 
@@ -33,12 +36,14 @@ dependencies:
   share_plus: ^10.1.2
   path_provider: ^2.1.4
   file_picker: ^8.1.3
+  fl_chart: ^0.69.2
 ```
 
 - `shared_preferences` — local persistence for balances, transactions, theme, and currency.
-- `share_plus` — opens the native share sheet for CSV exports and JSON backups.
+- `share_plus` — opens the native share sheet for CSV exports and JSON backups (mobile only — see Known Limitations).
 - `path_provider` — resolves a temp directory to write export files to before sharing.
-- `file_picker` — lets the user pick a `.json` file when restoring a backup.
+- `file_picker` — lets the user pick a `.json` file when restoring a backup, and provides the native "Save As" dialog for CSV/backup exports on desktop.
+- `fl_chart` — renders the category breakdown pie chart.
 
 ---
 
@@ -51,23 +56,27 @@ lib/
 ├── main.dart                       — entry point only, calls runApp(MyApp())
 ├── app.dart                        — MyApp widget: MaterialApp setup, theme mode state
 ├── models/
-│   └── transaction.dart            — Transaction data class (toJson/fromJson)
+│   ├── transaction.dart            — Transaction data class (toJson/fromJson), now with category + recurringId
+│   └── recurring_transaction.dart  — template for a fixed monthly item (Rent, Salary, etc.)
 ├── services/
-│   ├── storage_service.dart        — all SharedPreferences reads/writes (per-month balances, transactions, theme, currency, backup export/import)
-│   ├── csv_service.dart            — builds and shares a month's transactions as CSV
+│   ├── storage_service.dart        — all SharedPreferences reads/writes (per-month balances, transactions, recurring templates, theme, currency, backup export/import)
+│   ├── csv_service.dart            — builds and saves/shares a month's transactions as CSV (includes Category column)
 │   └── backup_service.dart         — builds/shares a full JSON backup, and validates/restores one
 ├── utils/
-│   └── currency_utils.dart         — shared money formatting and month-key helpers
+│   ├── currency_utils.dart         — shared money formatting and month-key helpers
+│   └── category_utils.dart         — category lists, icons, and colors used across dialogs, lists, and the breakdown chart
 ├── theme/
 │   ├── app_colors.dart             — color constants
 │   └── app_theme.dart              — light/dark ThemeData
 ├── widgets/
-│   ├── transaction_tile.dart       — shared transaction row (interactive or read-only)
+│   ├── transaction_tile.dart       — shared transaction row (interactive or read-only), shows category + recurring marker
 │   └── month_summary_card.dart     — shared balance summary card
 └── screens/
     ├── balance_home_page.dart      — current month: balance card, search/filter, transaction list, drawer, dialogs
     ├── archive_screen.dart         — Monthly History: list of past months with summary cards
-    └── month_detail_screen.dart    — read-only view of a single archived month
+    ├── month_detail_screen.dart    — read-only view of a single archived month
+    ├── recurring_transactions_screen.dart — manage recurring items: add, edit, pause, delete
+    └── category_breakdown_screen.dart     — pie chart + legend of spending/income by category
 ```
 
 `storage_service.dart` is the only file that talks to `shared_preferences` directly — every other file goes through it.
@@ -178,6 +187,41 @@ Three major features added in this release, plus a data-model change to support 
 - **New files:** `services/csv_service.dart`, `services/backup_service.dart`, `utils/currency_utils.dart`, `widgets/transaction_tile.dart`, `widgets/month_summary_card.dart`, `screens/archive_screen.dart`, `screens/month_detail_screen.dart`. See Project Structure above.
 - **New dependencies:** `share_plus`, `path_provider`, `file_picker`.
 
+### v2.0.1 — Drawer access and export-file bug fixes
+Two issues found shortly after v2.0 shipped:
+
+1. **Drawer was unreachable**
+   - **Issue:** The navigation drawer added in v2.0 had no button to open it — the app bar's custom app icon occupied the `leading` slot, so Flutter didn't auto-generate its usual hamburger button, leaving "Monthly History" and the rest of the drawer inaccessible.
+   - **Fix:** Added an explicit menu icon (☰) as the first app bar action, wired to a `GlobalKey<ScaffoldState>` that opens the drawer directly.
+
+2. **CSV and backup exports reported success but wrote nothing (desktop)**
+   - **Issue:** On Windows/macOS/Linux, `share_plus`'s file-sharing support is unreliable and can silently drop the attached file, sharing only the text caption. Switching to `file_picker`'s native "Save As" dialog fixed the dialog appearing, but the file still wasn't written — `file_picker`'s `saveFile()` only returns the chosen path on desktop; it does not write the given bytes itself there, unlike on mobile/web.
+   - **Fix:** `CsvService` and `BackupService` now branch by platform. Desktop writes the file explicitly to the path returned by the Save As dialog; mobile keeps using the `share_plus` share sheet, which works reliably there. Export feedback messages now show the actual saved path, or an accurate "cancelled" message if the Save As dialog was dismissed.
+
+### v2.1 — Category tags, recurring transactions, and a spending breakdown chart
+Three features added in this release:
+
+1. **Category tags**
+   - Every transaction can now be tagged with a category — Food, Rent, Transport, Entertainment, Utilities, Shopping, Health, or Other for expenses; Salary, Freelance, Gift, Investment, or Other for income.
+   - The Add and Edit dialogs include a category dropdown (icon + name per option), scoped to the right list for the transaction's type.
+   - Each transaction row shows a category-specific icon and the category name alongside the date.
+   - Transactions saved before this field existed default to "Other" on load, so old data and old backups keep working without a manual migration step.
+   - CSV exports now include a Category column between Title and Type.
+
+2. **Recurring transactions**
+   - "Recurring Transactions" in the drawer manages a list of fixed monthly templates (e.g. Rent, Salary, a subscription) — each with a title, amount, category, and an active/paused toggle.
+   - On the 1st of every month, every *active* template automatically generates a real transaction for that month, without requiring the user to open the app on that exact date — generation runs on every app load and catches up on any month that hasn't been processed yet.
+   - A separate "processed months" record (not the transaction list itself) tracks which templates have already fired for which months, so deleting a generated transaction afterward doesn't cause it to silently reappear on the next launch.
+   - Auto-generated entries display a small repeat icon next to their title so they're visually distinguishable from manually-added ones.
+   - Recurring templates and their processed-months record are included in JSON backups, so restoring a backup doesn't cause rules to re-fire and duplicate transactions.
+   - Auto-generated expenses are added unconditionally, without the usual overspending validation — blocking a rent payment because the balance is momentarily too low would defeat the purpose of automating it.
+
+3. **Category breakdown chart**
+   - A new pie chart screen (via the `fl_chart` package) shows where money went — or came from — for a given month, broken down by category with a percentage-labeled legend below the chart.
+   - An Expenses/Income toggle switches which side is charted.
+   - Reachable from the drawer for the current month, and from a new icon on each archived month's detail screen — the same screen and logic serve both cases.
+   - Each category has a fixed, distinct color, reused consistently between chart slices and legend swatches.
+
 ---
 
 ## Known Limitations / Future Scope
@@ -185,6 +229,8 @@ Three major features added in this release, plus a data-model change to support 
 - Data is stored **locally per device only** — there's no shared backend, so transactions don't sync across devices or between users.
 - Currency is a **display symbol only** — there's no real exchange-rate conversion, which is why switching currencies clears the current month's amounts rather than converting them. This also means archived months from before a currency change will render their stored numbers using whatever currency symbol is *currently* selected, since the symbol isn't stored per-transaction.
 - Backups are plain, unencrypted JSON files — anyone with the file can read its contents, so treat exported backups like any other personal financial data.
+- On desktop (Windows/macOS/Linux), CSV and backup exports use a native "Save As" dialog rather than a share sheet, since `share_plus` doesn't reliably support file sharing on those platforms. Mobile (Android/iOS) uses the native share sheet as usual.
+- Recurring items are only scoped to "the 1st of every month" — there's no option for a different day of the month, a different frequency (weekly, yearly), or an end date.
 
 ---
 
